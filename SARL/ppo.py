@@ -1,7 +1,7 @@
 import torch
 from torch import nn
-from model import small_size
-from memory import *
+from SARL.model import small_size
+from SARL.memory import *
 import copy
 
 device = torch.device('cpu')

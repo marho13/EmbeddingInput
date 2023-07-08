@@ -1,5 +1,5 @@
-from embedding import get_embedding
-from ppo import PPO
+from SARL.embedding import get_embedding
+from SARL.ppo import PPO
 import gym
 import wandb
 

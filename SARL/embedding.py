@@ -1,5 +1,5 @@
 # from torchvision.models import resnet18
-from resnet import resnet18
+from SARL.resnet import resnet18
 from matplotlib.image import imsave, imread
 import torch
 import numpy as np

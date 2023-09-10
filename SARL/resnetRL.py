@@ -1,8 +1,14 @@
+import re
 import torch
 from torch import Tensor
 import torch.nn as nn
 from typing import Type, Any, Callable, Union, List, Optional
 from torch.hub import load_state_dict_from_url
+from torch.distributions import Categorical, MultivariateNormal
+
+from copy import deepcopy, copy
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 model_urls = {
     'resnet18': 'https://download.pytorch.org/models/resnet18-f37072fd.pth',
@@ -135,7 +141,7 @@ class Bottleneck(nn.Module):
 
 class Resnet(nn.Module):
 
-    def __init__(self, block: Type[Union[BasicBlock, Bottleneck]], layers: List[int], num_classes: int = 1000,
+    def __init__(self, block: Type[Union[BasicBlock, Bottleneck]], layers: List[int], num_classes: int = 3,
             zero_init_residual: bool = False, groups: int = 1, width_per_group: int = 64,
             replace_stride_with_dilation: Optional[List[bool]] = None,
             norm_layer: Optional[Callable[..., nn.Module]] = None) -> None:
@@ -143,9 +149,15 @@ class Resnet(nn.Module):
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
         self._norm_layer = norm_layer
-
         self.inplanes = 64
         self.dilation = 1
+
+        self.action_dim = num_classes
+
+        action_std_init = 0.6
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.action_var = torch.full((num_classes,), action_std_init * action_std_init).to(self.device)
+
         if replace_stride_with_dilation is None:
             # each element in the tuple indicates if we should replace
             # the 2x2 stride with a dilated convolution instead
@@ -155,21 +167,46 @@ class Resnet(nn.Module):
                              "or a 3-element tuple, got {}".format(replace_stride_with_dilation))
         self.groups = groups
         self.base_width = width_per_group
-        self.conv1 = nn.Conv2d(3, self.inplanes, kernel_size=7, stride=2, padding=3,
-                               bias=False)
-        self.bn1 = norm_layer(self.inplanes)
-        self.relu = nn.ReLU(inplace=True)
-        self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-        self.layer1 = self._make_layer(block, 64, layers[0])
-        self.layer2 = self._make_layer(block, 128, layers[1], stride=2,
-                                       dilate=replace_stride_with_dilation[0])
-        self.layer3 = self._make_layer(block, 256, layers[2], stride=2,
-                                       dilate=replace_stride_with_dilation[1])
-        self.layer4 = self._make_layer(block, 512, layers[3], stride=2,
-                                       dilate=replace_stride_with_dilation[2])
-        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-        self.fc = nn.Linear(512 * block.expansion, num_classes)
 
+        self.actor = nn.Sequential(
+            nn.Conv2d(3, self.inplanes, kernel_size=7, stride=2, padding=3,
+                               bias=False),
+            norm_layer(self.inplanes),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=3, stride=2, padding=1),
+            
+            self._make_layer(block, 64, layers[0]), #layer 1
+            self._make_layer(block, 128, layers[1], stride=2, #layer 2
+                        dilate=replace_stride_with_dilation[0]),
+            self._make_layer(block, 256, layers[2], stride=2,
+                                       dilate=replace_stride_with_dilation[1]), #layer 3
+            self._make_layer(block, 512, layers[3], stride=2,
+                                       dilate=replace_stride_with_dilation[2]), #layer 4
+            
+            nn.AdaptiveAvgPool2d((1, 1)),
+            nn.Flatten(),
+            nn.Linear(512*block.expansion, num_classes))
+        
+        self.critic = nn.Sequential(
+            nn.Conv2d(3, self.inplanes, kernel_size=7, stride=2, padding=3,
+                               bias=False),
+            norm_layer(self.inplanes),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=3, stride=2, padding=1),
+            
+            self._make_layer(block, 64, layers[0]), #layer 1
+            self._make_layer(block, 128, layers[1], stride=2, #layer 2
+                        dilate=replace_stride_with_dilation[0]),
+            self._make_layer(block, 256, layers[2], stride=2,
+                                       dilate=replace_stride_with_dilation[1]), #layer 3
+            self._make_layer(block, 512, layers[3], stride=2,
+                                       dilate=replace_stride_with_dilation[2]), #layer 4
+            
+            nn.AdaptiveAvgPool2d((1, 1)),
+            nn.Flatten(),
+            nn.Linear(512*block.expansion, 1))
+            
+            
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
@@ -215,24 +252,65 @@ class Resnet(nn.Module):
     def _forward_impl(self, x: Tensor) -> Tensor:
         # See note [TorchScript super()]
         x = x.float().to("cuda")
-        x = self.conv1(x)
-        x = self.bn1(x)
-        x = self.relu(x)
-        x = self.maxpool(x)
-
-        x = self.layer1(x)
-        x = self.layer2(x)
-        x = self.layer3(x)
-        x = self.layer4(x)
-
-        x = self.avgpool(x)
-        x = torch.flatten(x, 1)
-        x = self.fc(x)
-
-        return x
+        return self.act(x)
+    
 
     def forward(self, x: Tensor) -> Tensor:
         return self._forward_impl(x)
+        
+    def act(self, state):
+        booler = True
+        if booler:
+            action_mean = self.actor(state)
+            cov_mat = torch.diag(self.action_var).unsqueeze(dim=0)
+            dist = MultivariateNormal(action_mean, cov_mat)
+        else:
+            action_probs = self.actor(state)
+            dist = Categorical(action_probs)
+
+        action = dist.sample()
+        action_logprob = dist.log_prob(action)
+
+        return action.detach(), action_logprob.detach()
+
+    def evaluate(self, state, action):
+        if True:#self.has_continuous_action_space:
+            action_mean = self.actor(state)
+
+            action_var = self.action_var.expand_as(action_mean)
+            cov_mat = torch.diag_embed(action_var).to(self.device)
+            #print(action_mean, cov_mat)
+            dist = MultivariateNormal(action_mean, cov_mat)
+
+            if self.action_dim == 1:
+                action = action.reshape(-1, self.action_dim)
+        else:
+            action_probs = self.actor(state)
+            dist = Categorical(action_probs)
+        action_logprobs = dist.log_prob(action)
+        dist_entropy = dist.entropy()
+        state_values = self.critic(state)
+
+        return action_logprobs, state_values, dist_entropy
+
+    def get_weights(self):
+        return copy({k: v.cpu() for k, v in self.state_dict().items()})
+
+    def set_weights(self, weights):
+        self.load_state_dict(weights)
+
+    def get_gradients(self):
+        grads = []
+        for p in self.parameters():
+            grad = None if p.grad is None else copy(p.grad.data.cpu().numpy())
+            grads.append(copy(grad))
+        return grads
+
+    def set_gradients(self, gradients):
+        for g, p in zip(gradients, self.parameters()):
+            if g is not None:
+                p.grad = torch.cuda.FloatTensor(g)
+        
 
 
 def _resnet(arch: str, block: Type[Union[BasicBlock, Bottleneck]], layers: List[int], pretrained: bool, progress: bool,
@@ -243,6 +321,22 @@ def _resnet(arch: str, block: Type[Union[BasicBlock, Bottleneck]], layers: List[
         model.load_state_dict(state_dict)
     return model
 
+def _resnetModified(arch: str, block: Type[Union[BasicBlock, Bottleneck]], layers: List[int], pretrained: bool, progress: bool,
+                **kwargs: Any) -> Resnet:
+    model = Resnet(block, layers, 1000, **kwargs)
+    
+    print(model.get_weights())
+    mod_state = {}
+    state_dict = load_state_dict_from_url(model_urls[arch], progress=progress)
+    for key, value in state_dict.items():
+        actKey = re.sub("layer", "actor.", key)
+        critKey = re.sub("layer", "critic.", key)
+        print(key, "----", actKey, "-------------------",critKey)
+        mod_state.update({actKey:value})
+        mod_state.update({critKey:value})
+    model.load_state_dict(mod_state)
+    return model, state_dict
+
 def resnet18(pretrained: bool = False, progress: bool = True, **kwargs: Any) -> Resnet:
     r"""ResNet-18 model from
     `"Deep Residual Learning for Image Recognition" <https://arxiv.org/pdf/1512.03385.pdf>`_.
@@ -251,16 +345,8 @@ def resnet18(pretrained: bool = False, progress: bool = True, **kwargs: Any) -> 
         pretrained (bool): If True, returns a model pre-trained on ImageNet
         progress (bool): If True, displays a progress bar of the download to stderr
     """
-    return _resnet('resnet18', BasicBlock, [2, 2, 2, 2], pretrained, progress,
+    return _resnetModified('resnet18', BasicBlock, [2, 2, 2, 2], pretrained, progress,
                    **kwargs)
 
-# class resnet18(nn.Module):
-#     def __init__(self):
-#         super(resnet18, self).__init__()
-#         self.inplanes = 64
-#         self.conv1 = nn.Conv2d(3, self.inplanes, kernel_size=(7,7), stride=(2,2), padding=3, bias=False)
-#         self.bn1 = nn.BatchNorm2d(self.inplanes)
-#         self.relu = nn.ReLU(inplace=True)
-#         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-#
-#
+
+

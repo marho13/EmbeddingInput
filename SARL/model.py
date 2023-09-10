@@ -4,7 +4,7 @@ from torch.distributions import Categorical, MultivariateNormal
 from copy import deepcopy, copy
 
 ################################## set device ##################################
-device = torch.device('cpu')
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')#device = torch.device('cpu')
 
 class small_size(nn.Module):
     def __init__(self, state_dim, action_dim, has_continuous_action_space, action_std_init):
@@ -48,8 +48,9 @@ class small_size(nn.Module):
             print("WARNING : Calling ActorCritic::set_action_std() on discrete action space policy")
             print("--------------------------------------------------------------------------------------------")
 
-    def forward(self):
-        raise NotImplementedError
+    def forward(self, inp):
+        inp = inp.cuda().float()
+        return self.act(inp)#raise NotImplementedError
 
     def act(self, state):
         if self.has_continuous_action_space:
@@ -100,5 +101,9 @@ class small_size(nn.Module):
     def set_gradients(self, gradients):
         for g, p in zip(gradients, self.parameters()):
             if g is not None:
-                p.grad = torch.from_numpy(g)
+                #try:
+                #    print(len(g), len(g[0]), p.shape)
+                #except:
+                #    print(len(g), p.shape)
+                p.grad = torch.cuda.FloatTensor(g)#from_numpy(g)
 

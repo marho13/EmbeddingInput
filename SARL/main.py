@@ -2,10 +2,11 @@ from embedding import get_embedding
 from ppo import PPO
 import gym
 import wandb
+import time
 import numpy as np
 from model import small_size
 #from resnet import resnet18
-from RLResnetModel import resnet18
+#from RLResnetModel import resnet18
 from worker import DataWorker
 from parameter import ParameterServer
 import ray
@@ -13,27 +14,30 @@ import ray
 class TrainNetwork:
     def __init__(self, num_epochs, ts, hp, env):
         self.epochs = num_epochs
+        self.maxTime = 0.0
         self.num_runs = 10
         self.maxSteps = ts
         self.param = hp
         self.k_epoch = hp["epochs"]
         self.model = PPO(hp["state_dim"], hp["action_dim"], hp["lr_act"], hp["lr_crit"], hp["gamma"], hp["epochs"],
-                         hp["clip"], hp["continuous"], 0.6, resnet18, 0)
+                         hp["clip"], hp["continuous"], 0.6, small_size, 0)
         self.env = gym.make(env)
-        self.logger = wandb.init(project="classifier_embedding_{}".format(env), group="resnet_transfer")
+        #self.logger = wandb.init(project="classifier_embedding_{}".format(env), group="embedding_best")
         self.has_continuous_action_space = True
         self.env_name = env
-        self.runInitializations(hp["state_dim"], hp["action_dim"], hp["lr_act"], hp["lr_crit"], hp["gamma"], hp["epochs"], hp["clip"], 0.6, env, 8, resnet18, "resnet")#self.iterate_n_epochs()
+        self.runInitializations(hp["state_dim"], hp["action_dim"], hp["lr_act"], hp["lr_crit"], hp["gamma"], hp["epochs"], hp["clip"], 0.6, env, 8, small_size, "small_size")#self.iterate_n_epochs()
 
     def iterate_n_epochs(self):
         rewards = []
         for e in range(self.epochs):
-            rew, loss = self.run_n_agent_episode()
+            rew = self.run_one_episode()
+            #rew, loss = self.run_n_agent_episode()
             #loss = self.model.update()
             
             rewards.append(rew)
             print("Episode {}, gave reward: {} & avg {}".format(e, rew, sum(rewards[-50:])/50))
-            self.log_stats(rew, loss, e)
+            #self.log_stats(rew, loss, e)
+        print("Highest latency is: ", self.maxTime)
 
     def initialiseRun(self, state_dim, action_dim, lr_actor, lr_critic, gamma, k_epochs, eps_clip, action_std, env_name, num_agents, netsize):
         self.worker = [DataWorker.remote(state_dim, action_dim, lr_actor, lr_critic, gamma, k_epochs, eps_clip,
@@ -47,12 +51,15 @@ class TrainNetwork:
     
     def runInitializations(self, state_dim, action_dim, lr_actor, lr_critic, gamma, k_epochs, eps_clip, action_std, env_name, num_agents, netsize, netstring):
         for a in range(self.num_runs):
-            self.logger = wandb.init(project="classifier_embedding_{}".format(self.env_name), group="resnet_transfer")#resnet18")
+            #self.logger = wandb.init(project="classifier_embedding_{}".format(self.env_name), group="embedding_best")#resnet18")
             print("Run {}:".format(a))
-            self.initialiseRun(state_dim, action_dim, lr_actor, lr_critic, gamma, k_epochs, eps_clip, action_std, env_name, num_agents, netsize)
+            #self.initialiseRun(state_dim, action_dim, lr_actor, lr_critic, gamma, k_epochs, eps_clip, action_std, env_name, num_agents, netsize)
             self.iterate_n_epochs()
-            self.logger.finish()
-        self.logger.finish()
+            #self.logger.finish()
+        #self.logger.finish()
+        timeLog = open("time.csv", "a")
+        timeLog.write("resnet50" + "," + str(self.maxTime))
+        timeLog.close()
 
 
 
@@ -81,9 +88,10 @@ class TrainNetwork:
         done = False
         episode_rew = 0.0
         #print(len(state), len(state[0]))
-        while (steps < self.maxSteps) and (done == False):
-            state, rew, done = self.training_loop(state, env)
+        while (steps < self.maxSteps) and (done == False): 
+            state, rew, done = self.training_loop(state, env, steps)
             episode_rew += rew
+            
             #if steps % 100 == 0:
             #    print("Steps: {}/{}".format(steps, self.maxSteps))
             #    print("Done: {}".format(done))
@@ -92,11 +100,16 @@ class TrainNetwork:
         
         return episode_rew
 
-    def training_loop(self, image, env):
+    def training_loop(self, image, env, steps):
+        currentTime = time.time()
         emb = get_embedding(image)
         action = self.model.select_action(emb)
         state, rew, done, _, __ = env.step(action)
-        self.model.save_rew_terminal(rew, done)
+        newTime = time.time()-currentTime
+        if steps != 0 and not done:
+            if newTime > self.maxTime:
+                self.maxTime = newTime
+        #self.model.save_rew_terminal(rew, done)
         state = np.double(np.swapaxes(np.expand_dims(state, axis=0), 1, -1))
         return state, rew, done
 
@@ -126,7 +139,7 @@ hyper_parameters = {"state_dim": state_dim, "action_dim": action_dim, "lr_act": 
                     "gamma": gamma, "epochs": ppo_epochs, "clip": clip, "continuous": continuous_action_space}
 
 ###Env hyperparameters###
-epochs = 300000
+epochs = 10
 timesteps = 1000
 env_name = "CarRacing-v2"
 

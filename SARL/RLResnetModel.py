@@ -323,14 +323,12 @@ def _resnet(arch: str, block: Type[Union[BasicBlock, Bottleneck]], layers: List[
 
 def _resnetModified(arch: str, block: Type[Union[BasicBlock, Bottleneck]], layers: List[int], pretrained: bool, progress: bool,
                 **kwargs: Any) -> Resnet:
-    model = Resnet(block, layers, 1000, **kwargs)
-    
-    #print(model.get_weights())
+    model = Resnet(block, layers, 3, **kwargs)
+
     mod_state = {}
     state_dict = load_state_dict_from_url(model_urls[arch], progress=progress)
-    #print(state_dict)
     for key, value in state_dict.items():
-        #if "fc" in key or "layer4.1.bn2.bias" in key: pass
+
         if ("layer" in key):
             actKey = re.sub("layer", "actor.layer", key)
             critKey = re.sub("layer", "critic.layer", key)
@@ -338,32 +336,23 @@ def _resnetModified(arch: str, block: Type[Union[BasicBlock, Bottleneck]], layer
             actKey = "actor." + key
             critKey = "critic." + key
          
-        #print(key, "----", actKey, "-------------------",critKey)
+
         if "fc" not in key and "layer4.1.bn2.bias" not in key:
             mod_state.update({actKey:value})
             mod_state.update({critKey:value})
         else: pass
-            #print(key)
+
     
              
     mod_state.update({"actor.layer4.1.bn2.bias":model.actor.layer4[1].bn2.bias})
     mod_state.update({"critic.layer4.1.bn2.bias":model.critic.layer4[1].bn2.bias})
 
-    #[print(key) for key, value in state_dict.items()]
-    #[print(key) for key, value in mod_state.items()]
     mod_state.update({"actor.fc.weight":model.actor.fc.weight})
     mod_state.update({"actor.fc.bias":model.actor.fc.bias})
-    #mod_state.update({"actor.layer4.1.bn2.bias": model.actor.layer4.1.bn2.bias})
 
     mod_state.update({"critic.fc.weight":model.critic.fc.weight})
     mod_state.update({"critic.fc.bias":model.critic.fc.bias})
-    #mod_state.update({"critic.layer4.1.bn2.bias": model.critic.layer4.1.bn2.bias})
 
-    #state_dict.update({"actFc.weight":model.actFc.weight})
-    #state_dict.update({"actFc.bias":model.actFc.bias})
-
-    #state_dict.update({"critFc.weight":model.critFc.weight})
-    #state_dict.update({"critFc.bias":model.critFc.bias})
 
     model.load_state_dict(mod_state)#state_dict)#mod_state)
     return model

@@ -38,8 +38,8 @@ class DataWorker(object):
     def getLoss(self, weights):
         self.model.policy.set_weights(weights)
         a, b, c, d = self.model.getTrainingMem()
-        loss = self.model.trainKepochs(a, b, c, d)
-        #loss = self.model.trainKepochsBatch(a, b, c, d)
+        #loss = self.model.trainKepochs(a, b, c, d)
+        loss = self.model.trainKepochsBatch(a, b, c, d)
         return [copy.copy(self.model.policy.get_gradients()), loss]
 
     def calcGrad(self, weights):
@@ -73,8 +73,8 @@ class DataWorker(object):
         return episode_rew, steps
 
     def training_loop(self, image, env):
-        emb = get_embedding(image)
-        action = self.model.select_action(emb.to(self.device))#torch.from_numpy(image).float().to(self.device))#emb.to(self.device))
+        #emb = get_embedding(image)
+        action = self.model.select_action(torch.from_numpy(image).float().to(self.device))#emb.to(self.device))
         state, rew, done, _, __ = env.step(action)
         self.model.save_rew_terminal(rew, done)
         state = np.double(np.swapaxes(np.expand_dims(state, axis=0), 1, -1))

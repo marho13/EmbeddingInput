@@ -315,27 +315,10 @@ class Resnet(nn.Module):
 
 def _resnet(arch: str, block: Type[Union[BasicBlock, Bottleneck]], layers: List[int], pretrained: bool, progress: bool,
                 **kwargs: Any) -> Resnet:
-    model = Resnet(block, layers, **kwargs)
-    if pretrained:
-        state_dict = load_state_dict_from_url(model_urls[arch], progress=progress)
-        model.load_state_dict(state_dict)
+    model = Resnet(block, layers, 3, **kwargs)
     return model
 
-def _resnetModified(arch: str, block: Type[Union[BasicBlock, Bottleneck]], layers: List[int], pretrained: bool, progress: bool,
-                **kwargs: Any) -> Resnet:
-    model = Resnet(block, layers, 1000, **kwargs)
-    
-    print(model.get_weights())
-    mod_state = {}
-    state_dict = load_state_dict_from_url(model_urls[arch], progress=progress)
-    for key, value in state_dict.items():
-        actKey = re.sub("layer", "actor.", key)
-        critKey = re.sub("layer", "critic.", key)
-        print(key, "----", actKey, "-------------------",critKey)
-        mod_state.update({actKey:value})
-        mod_state.update({critKey:value})
-    model.load_state_dict(mod_state)
-    return model, state_dict
+
 
 def resnet18(pretrained: bool = False, progress: bool = True, **kwargs: Any) -> Resnet:
     r"""ResNet-18 model from
@@ -345,7 +328,7 @@ def resnet18(pretrained: bool = False, progress: bool = True, **kwargs: Any) -> 
         pretrained (bool): If True, returns a model pre-trained on ImageNet
         progress (bool): If True, displays a progress bar of the download to stderr
     """
-    return _resnetModified('resnet18', BasicBlock, [2, 2, 2, 2], pretrained, progress,
+    return _resnet('resnet18', BasicBlock, [2, 2, 2, 2], pretrained, progress,
                    **kwargs)
 
 

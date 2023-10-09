@@ -9,9 +9,9 @@ from torchsummary import summary
 
 class ParameterServer(object):
     def __init__(self, state_dim, action_dim, lr_actor, lr_critic, gamma, k_epochs, eps_clip, has_continuous_action_space, action_std, numAgents, netsize, a=0):
-        self.device = torch.device('cuda')
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         #print(self.device)
-        self.model = netsize(state_dim, action_dim, has_continuous_action_space, action_std).to(self.device)#small_size(state_dim, action_dim, has_continuous_action_space, action_std).to(self.device)#, non_blocking=True)#PPO(state_dim, action_dim, lr_actor, lr_critic, gamma, k_epochs, eps_clip, has_continuous_action_space, action_std, netsize)#resnet18(pretrained=False).to(self.device)#small_size(state_dim, action_dim, has_continuous_action_space, action_std).to(self.device)#, non_blocking=True)#PPO(state_dim, action_dim, lr_actor, lr_critic, gamma, k_epochs, eps_clip, has_continuous_action_space, action_std, netsize)
+        self.model = small_size(state_dim, action_dim, has_continuous_action_space, action_std).to(self.device)#, non_blocking=True)#PPO(state_dim, action_dim, lr_actor, lr_critic, gamma, k_epochs, eps_clip, has_continuous_action_space, action_std, netsize)#resnet18(pretrained=False).to(self.device)#small_size(state_dim, action_dim, has_continuous_action_space, action_std).to(self.device)#, non_blocking=True)#PPO(state_dim, action_dim, lr_actor, lr_critic, gamma, k_epochs, eps_clip, has_continuous_action_space, action_std, netsize)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr_actor)
         self.num_agents = numAgents
         #self.model.policy.to(self.device)

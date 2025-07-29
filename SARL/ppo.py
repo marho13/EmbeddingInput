@@ -71,9 +71,9 @@ class PPO:
                 state = torch.cuda.FloatTensor(state).to(self.device)
                 action, action_logprob = self.policy_old.act(state)
 
-            #self.buffer.states.append(state.detach())
-            #self.buffer.actions.append(action)
-            #self.buffer.logprobs.append(action_logprob)
+            self.buffer.states.append(state.detach())
+            self.buffer.actions.append(action)
+            self.buffer.logprobs.append(action_logprob)
 
             return action.detach().cpu().numpy().flatten()
         else:
@@ -81,9 +81,9 @@ class PPO:
                 state = torch.cuda.FloatTensor(state).to(self.device)
                 action, action_logprob = self.policy_old.act(state)
 
-            #self.buffer.states.append(state.detach())
-            #self.buffer.actions.append(action)
-            #self.buffer.logprobs.append(action_logprob)
+            self.buffer.states.append(state.detach())
+            self.buffer.actions.append(action)
+            self.buffer.logprobs.append(action_logprob)
 
             return action.cpu().item()
 
@@ -218,6 +218,7 @@ class PPO:
 
 
     def trainKepochs(self, old_states, old_actions, old_logprobs, rewards):
+        #print(old_states.size(), old_actions.size())
         # Optimize policy for K epochs
         # Evaluating old actions and values
         logprobs, state_values, dist_entropy = self.policy.evaluate(old_states, old_actions)

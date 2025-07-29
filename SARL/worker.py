@@ -1,22 +1,22 @@
 import ray
 import time
-from ppo import PPO
+from PPO import PPO
 import gym
 from memory import Memory
 import copy
 import numpy as np
 import torch
 from embedding import get_embedding
+from transformers import AutoVideoProcessor, AutoModel
 
-@ray.remote(max_restarts=-1, max_task_retries=2, num_gpus=0.25, memory=16096*1024*1024)
+@ray.remote(max_restarts=-1, max_task_retries=2, num_gpus=1.0, memory=16096*1024*1024)
 class DataWorker(object):
     def __init__(self, state_dim, action_dim, lr_actor, lr_critic, gamma, k_epochs, eps_clip, has_continuous_action_space, action_std, env_name, netsize, a):
-        # random.seed(seed)
-        # np.random.seed(seed)
-        # torch.manual_seed(seed)
-        #
-        # self.seed = seed
+        hf_repo = "facebook/vjepa2-vitl-fpc64-256"
+        self.emb_model = AutoModel.from_pretrained(hf_repo, device_map="cuda")#.to("cuda")
+        self.pre_processor = AutoVideoProcessor.from_pretrained(hf_repo, device_map="cuda")#.to("cuda")
         self.device = torch.device('cuda')
+        self.repeating = state_dim//(1024*256)
         time.sleep(a*5)
         self.model = PPO(state_dim, action_dim, lr_actor, lr_critic, gamma, k_epochs, eps_clip, has_continuous_action_space, action_std, netsize, a)#.to(device)
         self.model.policy.to(self.device, non_blocking=True)
@@ -25,6 +25,7 @@ class DataWorker(object):
         self.env.reset()#seed=env_seed)
         self.memory = Memory()
         self.maxSteps = 1000
+        self.images = []
 
     def gatherReplay(self, weights):
         self.model.policy.set_weights(weights)
@@ -53,29 +54,34 @@ class DataWorker(object):
 
     def policyOldUp(self):
         self.model.policyOldUp()
-
+    
     def run_one_episode(self):
         env = self.env
         steps = 0
         state = self.resetter()
+        state = torch.from_numpy(np.array([np.float16(state)]*self.repeating)).to("cuda").float()
         done = False
         episode_rew = 0.0
         #print(len(state), len(state[0]))
         while (steps < self.maxSteps) and (done == False):
-            state, rew, done = self.training_loop(state, env)
+            temp_state, rew, done = self.training_loop(state.float().to(self.device), env)
             episode_rew += rew
-            #if steps % 100 == 0:
-            #    print("Steps: {}/{}".format(steps, self.maxSteps))
-            #    print("Done: {}".format(done))
+            #state = temp_state
+            state = state[1:]
+            state = torch.concat([torch.from_numpy(temp_state).unsqueeze(0).to("cuda"), state], axis=0).float()
 
             steps += 1
 
         return episode_rew, steps
-
+    
     def training_loop(self, image, env):
-        emb = get_embedding(image)
+        vid_inp = self.pre_processor(image, return_tensors="pt")["pixel_values_videos"].float()
+        emb = self.emb_model.get_vision_features(vid_inp).float()
+        #emb = get_embedding(image)
         action = self.model.select_action(emb.to(self.device))#torch.from_numpy(image).float().to(self.device))#emb.to(self.device))
         state, rew, done, _, __ = env.step(action)
+        #If unity env
+        # action = (action - [1.0, 0.5, 0.5])*2
         self.model.save_rew_terminal(rew, done)
         state = np.double(np.swapaxes(np.expand_dims(state, axis=0), 1, -1))
         return state, rew, done
@@ -161,3 +167,4 @@ class DataWorker(object):
         s = np.expand_dims(state, axis=0)
         s = np.swapaxes(s, 1, -1)
         return torch.from_numpy(s.copy())
+

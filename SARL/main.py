@@ -1,12 +1,10 @@
 from embedding import get_embedding
-from ppo import PPO
+from PPO import PPO
 import gym
 import wandb
 import time
 import numpy as np
-from model import small_size
-#from resnet import resnet18
-#from RLResnetModel import resnet18
+from model import small_size, ActorCriticConv
 from worker import DataWorker
 from parameter import ParameterServer
 import ray
@@ -15,7 +13,7 @@ class TrainNetwork:
     def __init__(self, num_epochs, ts, hp, env):
         self.epochs = num_epochs
         self.maxTime = 0.0
-        self.num_runs = 10
+        self.num_runs = 1
         self.maxSteps = ts
         self.param = hp
         self.k_epoch = hp["epochs"]
@@ -25,18 +23,18 @@ class TrainNetwork:
         #self.logger = wandb.init(project="classifier_embedding_{}".format(env), group="embedding_best")
         self.has_continuous_action_space = True
         self.env_name = env
-        self.runInitializations(hp["state_dim"], hp["action_dim"], hp["lr_act"], hp["lr_crit"], hp["gamma"], hp["epochs"], hp["clip"], 0.6, env, 8, small_size, "small_size")#self.iterate_n_epochs()
+        self.runInitializations(hp["state_dim"], hp["action_dim"], hp["lr_act"], hp["lr_crit"], hp["gamma"], hp["epochs"], hp["clip"], 0.6, env, 8, ActorCriticConv, "ActorCriticConv")#self.iterate_n_epochs()
 
     def iterate_n_epochs(self):
         rewards = []
         for e in range(self.epochs):
-            rew = self.run_one_episode()
-            #rew, loss = self.run_n_agent_episode()
+            #rew = self.run_one_episode()
+            rew, loss = self.run_n_agent_episode()
             #loss = self.model.update()
             
             rewards.append(rew)
             print("Episode {}, gave reward: {} & avg {}".format(e, rew, sum(rewards[-50:])/50))
-            #self.log_stats(rew, loss, e)
+            self.log_stats(rew, loss, e)
         print("Highest latency is: ", self.maxTime)
 
     def initialiseRun(self, state_dim, action_dim, lr_actor, lr_critic, gamma, k_epochs, eps_clip, action_std, env_name, num_agents, netsize):
@@ -51,12 +49,12 @@ class TrainNetwork:
     
     def runInitializations(self, state_dim, action_dim, lr_actor, lr_critic, gamma, k_epochs, eps_clip, action_std, env_name, num_agents, netsize, netstring):
         for a in range(self.num_runs):
-            #self.logger = wandb.init(project="classifier_embedding_{}".format(self.env_name), group="embedding_best")#resnet18")
+            self.logger = wandb.init(project="classifier_embedding_{}".format(self.env_name), group="video_embedder_smaller")#resnet18")
             print("Run {}:".format(a))
-            #self.initialiseRun(state_dim, action_dim, lr_actor, lr_critic, gamma, k_epochs, eps_clip, action_std, env_name, num_agents, netsize)
+            self.initialiseRun(state_dim, action_dim, lr_actor, lr_critic, gamma, k_epochs, eps_clip, action_std, env_name, num_agents, netsize)
             self.iterate_n_epochs()
             #self.logger.finish()
-        #self.logger.finish()
+        self.logger.finish()
         timeLog = open("time.csv", "a")
         timeLog.write("resnet50" + "," + str(self.maxTime))
         timeLog.close()
@@ -75,7 +73,7 @@ class TrainNetwork:
             for a in range(len(output)):
                 grad.append(output[a][0])#.detach())
                 loss.append(output[a][1].item())
-            #current_weights = self.ps.calcAvgGrad(*grad)
+            #current_weights = self.ps.calcGrad(*grad)
             current_weights = self.ps.lossweighted(grad, loss)#self.ps.appGrad(g)#
         [w.memClear.remote() for w in self.worker]#self.worker.memClear()#.remote()
         [w.policyOldUp.remote() for w in self.worker]#self.worker.policyOldUp()
@@ -123,7 +121,7 @@ class TrainNetwork:
         
 
 ###Hyperparameters###
-state_dim = 1000
+state_dim = 3*1024*256#1000
 action_dim = 3  # Chosen by the environment
 
 lr_actor = 0.00003
@@ -139,8 +137,8 @@ hyper_parameters = {"state_dim": state_dim, "action_dim": action_dim, "lr_act": 
                     "gamma": gamma, "epochs": ppo_epochs, "clip": clip, "continuous": continuous_action_space}
 
 ###Env hyperparameters###
-epochs = 10
-timesteps = 1000
+epochs = 10000
+timesteps = 1600
 env_name = "CarRacing-v2"
 
 TrainNetwork(num_epochs=epochs, ts=timesteps, hp=hyper_parameters, env=env_name)

@@ -1,7 +1,7 @@
 import ray
 import torch
 import numpy as np
-from ppo import PPO
+from PPO import PPO
 from model import small_size
 from torchsummary import summary
 #from resnetRL import resnet18
@@ -80,7 +80,7 @@ class ParameterServer(object):
     
     def lossweighted(self, grad, loss):
         output = self.getLossWeightedGrads(grad, loss)
-        self.calcAvgGrad(*output)#self.listCalcAvgGrad(output)#self.calcAvgGrad(*output)
+        self.calcGrad(*output)#self.listCalcAvgGrad(output)#self.calcAvgGrad(*output)
         return self.model.get_weights()
 
     def rewardUpscaledweighted(self, grad, rew):
@@ -134,16 +134,14 @@ class ParameterServer(object):
         summed_gradients = np.multiply(summed_gradients, (self.num_agents/2))
         self.updater(summed_gradients)
         return self.model.get_weights()
-
+        
+    
     def calcAvgGrad(self, *gradients):
-        # [print(g) for g in zip(*gradients)]
         summed_gradients = [
             np.stack(gradient_zip).sum(axis=0)
             for gradient_zip in zip(*gradients)
         ]
-        # summed_gradients = np.multiply(summed_gradients, (self.num_agents/2))
-        #self.updater(summed_gradients)
-        summed_gradients = np.divide(summed_gradients, self.num_agents) #The averaged gradient
+        summed_gradients = [s/self.num_agents for s in summed_gradients]
         self.updater(summed_gradients)
         return self.model.get_weights()
 
